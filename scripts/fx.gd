@@ -1,75 +1,184 @@
-# FX autoload: one-shot GPUParticles3D bursts (WebGL-safe: small amounts,
-# billboarded quads, unshaded materials). Freed automatically via `finished`.
-extends Node
+class_name Fx
+extends RefCounted
+## One-shot particle burst factory.
+##
+## Uses GPUParticles3D (supported by the Compatibility renderer, so it survives
+## the WebGL export) with small amounts and short lifetimes.
+##
+## PERFORMANCE NOTE: every heavy GPU-side resource (process material, gradient
+## texture, quad mesh, billboard material) is built once and cached statically.
+## A naive implementation allocates a fresh ParticleProcessMaterial + Gradient +
+## GradientTexture1D per hit, which means new GPU uploads on every single sword
+## blow -- a reliable source of hitching in a WebGL build. Instead the emitter
+## NODE is rotated so its local +Y aligns with the surface normal, letting one
+## shared material serve every direction. Per-hit variation comes from `amount`,
+## which is a node property and therefore free.
 
-var _mats: Dictionary = {}
+enum Kind { BLOOD, SPARKS, DUST, RUNE }
+
+static var _proc := {}
+static var _mesh := {}
 
 
-func _mat(color: Color) -> StandardMaterial3D:
-	var k := color.to_html()
-	if _mats.has(k):
-		return _mats[k]
+static func _billboard(color: Color, additive: bool) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.blend_mode = (BaseMaterial3D.BLEND_MODE_ADD if additive
+			else BaseMaterial3D.BLEND_MODE_MIX)
+	m.vertex_color_use_as_albedo = true
 	m.albedo_color = color
-	_mats[k] = m
+	m.disable_receive_shadows = true
 	return m
 
 
-func burst(pos: Vector3, normal: Vector3, color: Color, count: int,
-		speed: float, lifetime: float, quad_size: float, gravity_y: float = -9.8) -> void:
+static func _ramp(a: Color, b: Color) -> GradientTexture1D:
+	var g := Gradient.new()
+	g.set_color(0, a)
+	g.set_color(1, b)
+	var t := GradientTexture1D.new()
+	t.gradient = g
+	return t
+
+
+static func _quad(size: float, mat: Material) -> QuadMesh:
+	var q := QuadMesh.new()
+	q.size = Vector2(size, size)
+	q.material = mat
+	return q
+
+
+## Builds and caches the shared resources for one effect kind.
+static func _ensure(kind: Kind) -> void:
+	if _proc.has(kind):
+		return
+	var p := ParticleProcessMaterial.new()
+	# +Y local: the emitter node is oriented so this points along the normal
+	p.direction = Vector3.UP
+
+	match kind:
+		Kind.BLOOD:
+			p.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+			p.emission_sphere_radius = 0.10
+			p.spread = 52.0
+			p.initial_velocity_min = 2.4
+			p.initial_velocity_max = 7.5
+			p.gravity = Vector3(0, -13.0, 0)
+			p.damping_min = 1.0
+			p.damping_max = 3.5
+			p.scale_min = 0.05
+			p.scale_max = 0.17
+			p.angular_velocity_min = -220.0
+			p.angular_velocity_max = 220.0
+			p.color_ramp = _ramp(Color(0.62, 0.05, 0.04, 1.0),
+					Color(0.20, 0.02, 0.02, 0.0))
+			_mesh[kind] = _quad(0.14,
+					_billboard(Color(0.6, 0.05, 0.04), false))
+
+		Kind.SPARKS:
+			p.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_POINT
+			p.spread = 68.0
+			p.initial_velocity_min = 5.0
+			p.initial_velocity_max = 13.0
+			p.gravity = Vector3(0, -17.0, 0)
+			p.damping_min = 2.0
+			p.damping_max = 6.0
+			p.scale_min = 0.020
+			p.scale_max = 0.055
+			p.color_ramp = _ramp(Color(1.0, 0.92, 0.62, 1.0),
+					Color(1.0, 0.32, 0.05, 0.0))
+			_mesh[kind] = _quad(0.05,
+					_billboard(Color(1.0, 0.8, 0.45), true))
+
+		Kind.DUST:
+			p.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+			p.emission_sphere_radius = 0.16
+			p.spread = 85.0
+			p.initial_velocity_min = 0.5
+			p.initial_velocity_max = 2.4
+			p.gravity = Vector3(0, -1.6, 0)
+			p.damping_min = 1.5
+			p.damping_max = 3.0
+			p.scale_min = 0.18
+			p.scale_max = 0.52
+			p.color_ramp = _ramp(Color(0.58, 0.56, 0.52, 0.55),
+					Color(0.45, 0.44, 0.42, 0.0))
+			_mesh[kind] = _quad(0.40,
+					_billboard(Color(0.55, 0.53, 0.50), false))
+
+		Kind.RUNE:
+			p.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+			p.emission_sphere_radius = 0.22
+			p.spread = 180.0
+			p.initial_velocity_min = 1.2
+			p.initial_velocity_max = 4.2
+			p.gravity = Vector3(0, -2.0, 0)
+			p.damping_min = 3.0
+			p.damping_max = 7.0
+			p.scale_min = 0.03
+			p.scale_max = 0.11
+			p.color_ramp = _ramp(Color(0.72, 0.95, 1.0, 1.0),
+					Color(0.20, 0.55, 0.95, 0.0))
+			_mesh[kind] = _quad(0.08,
+					_billboard(Color(0.7, 0.93, 1.0), true))
+
+	_proc[kind] = p
+
+
+## Orthonormal basis whose +Y axis lies along `n`.
+static func _align_y(n: Vector3) -> Basis:
+	var y := n.normalized()
+	if y.length_squared() < 0.5:
+		y = Vector3.UP
+	var x := y.cross(Vector3.UP)
+	if x.length_squared() < 0.001:
+		x = Vector3.RIGHT
+	x = x.normalized()
+	var z := x.cross(y).normalized()
+	return Basis(x, y, z)
+
+
+static func _burst(parent: Node, pos: Vector3, normal: Vector3, kind: Kind,
+		amount: int, lifetime: float) -> void:
+	if parent == null or not is_instance_valid(parent):
+		return
+	_ensure(kind)
 	var p := GPUParticles3D.new()
-	p.amount = count
+	p.amount = maxi(1, amount)
 	p.lifetime = lifetime
 	p.one_shot = true
 	p.explosiveness = 0.92
-	p.visibility_aabb = AABB(Vector3(-4, -4, -4), Vector3(8, 8, 8))
-	var pm := ParticleProcessMaterial.new()
-	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-	pm.emission_sphere_radius = 0.15
-	pm.direction = normal
-	pm.spread = 40.0
-	pm.initial_velocity_min = speed * 0.4
-	pm.initial_velocity_max = speed
-	pm.gravity = Vector3(0, gravity_y, 0)
-	pm.damping_min = 1.0
-	pm.damping_max = 2.5
-	pm.scale_min = 0.7
-	pm.scale_max = 1.3
-	# fade out over life
-	var grad := Gradient.new()
-	grad.set_color(0, Color(1, 1, 1, 1))
-	grad.set_color(1, Color(1, 1, 1, 0))
-	var gt := GradientTexture1D.new()
-	gt.gradient = grad
-	pm.color_ramp = gt
-	p.process_material = pm
-	var quad := QuadMesh.new()
-	quad.size = Vector2(quad_size, quad_size)
-	quad.material = _mat(color)
-	p.draw_pass_1 = quad
-	var scene := get_tree().current_scene
-	if scene == null:
-		p.queue_free()
-		return
-	scene.add_child(p)
-	p.global_position = pos
-	p.finished.connect(p.queue_free)
+	p.randomness = 0.45
+	p.fixed_fps = 30
+	p.local_coords = false
+	p.draw_pass_1 = _mesh[kind]
+	p.process_material = _proc[kind]
+	p.visibility_aabb = AABB(Vector3(-3, -3, -3), Vector3(6, 6, 6))
+	parent.add_child(p)
+	p.global_transform = Transform3D(_align_y(normal), pos)
 	p.emitting = true
 
-
-func spawn_blood(pos: Vector3) -> void:
-	burst(pos, Vector3.UP, Color(0.55, 0.04, 0.05, 1.0), 20, 6.0, 0.55, 0.13)
-
-
-func spawn_sparks(pos: Vector3, normal: Vector3) -> void:
-	burst(pos, normal, Color(1.0, 0.75, 0.3, 1.0), 16, 9.0, 0.4, 0.07, -14.0)
-
-
-func spawn_dust(pos: Vector3, normal: Vector3) -> void:
-	burst(pos, normal, Color(0.75, 0.78, 0.85, 0.8), 14, 3.0, 0.8, 0.22, -1.5)
+	var t := Timer.new()
+	t.wait_time = lifetime * 1.9 + 0.2
+	t.one_shot = true
+	t.autostart = true
+	p.add_child(t)
+	t.timeout.connect(func(): if is_instance_valid(p): p.queue_free())
 
 
-func spawn_snow_puff(pos: Vector3) -> void:
-	burst(pos, Vector3.UP, Color(0.9, 0.93, 1.0, 0.9), 10, 2.5, 0.7, 0.16, -2.0)
+static func blood(parent: Node, pos: Vector3, normal: Vector3,
+		scale_mult: float = 1.0) -> void:
+	_burst(parent, pos, normal, Kind.BLOOD, int(26.0 * scale_mult), 0.85)
+
+
+static func sparks(parent: Node, pos: Vector3, normal: Vector3) -> void:
+	_burst(parent, pos, normal, Kind.SPARKS, 22, 0.45)
+
+
+static func dust(parent: Node, pos: Vector3, normal: Vector3) -> void:
+	_burst(parent, pos, normal, Kind.DUST, 14, 1.15)
+
+
+static func rune_flash(parent: Node, pos: Vector3) -> void:
+	_burst(parent, pos, Vector3.UP, Kind.RUNE, 20, 0.55)

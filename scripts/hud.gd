@@ -1,142 +1,194 @@
-# GameHUD: CanvasLayer with HP bar, wave/kill counters, crosshair,
-# damage vignette, controls hint, and game-over overlay.
-class_name GameHUD
+class_name Hud
 extends CanvasLayer
+## Diegetic-ish overlay: health, axe state, wave progress, aim crosshair,
+## damage vignette and the end-of-run screens. Everything is drawn in code so the
+## build carries no UI texture or theme dependencies.
 
-var hp_bar: ProgressBar
-var wave_label: Label
-var kills_label: Label
-var crosshair: ColorRect
-var vignette: ColorRect
-var hint_label: Label
-var gameover_panel: CenterContainer
+const RED := Color(0.78, 0.13, 0.11)
+const RUNE := Color(0.58, 0.86, 1.0)
+const BONE := Color(0.90, 0.88, 0.82)
+
+var health := 1.0
+var health_shown := 1.0
+var axe_label := "EQUIPPED"
+var axe_ready := true
+var wave := 0
+var enemies_left := 0
+var kills := 0
+
+var aim_blend := 0.0
+var hurt_flash := 0.0
+var game_over := false
+var victory := false
+
+var _msg := ""
+var _msg_t := 0.0
+var _painter: Control
+var _rig: CameraRig
 
 
 func _ready() -> void:
-	# HP bar
-	var hp_title := Label.new()
-	hp_title.text = "VITALITY"
-	hp_title.position = Vector2(20, 8)
-	add_child(hp_title)
-	hp_bar = ProgressBar.new()
-	hp_bar.min_value = 0
-	hp_bar.max_value = 100
-	hp_bar.value = 100
-	hp_bar.show_percentage = false
-	hp_bar.position = Vector2(20, 28)
-	hp_bar.custom_minimum_size = Vector2(260, 22)
-	add_child(hp_bar)
-
-	wave_label = Label.new()
-	wave_label.text = "WAVE 0"
-	wave_label.add_theme_font_size_override("font_size", 28)
-	wave_label.anchor_left = 0.5
-	wave_label.anchor_right = 0.5
-	wave_label.offset_left = -80
-	wave_label.offset_right = 80
-	wave_label.offset_top = 12
-	wave_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	add_child(wave_label)
-
-	kills_label = Label.new()
-	kills_label.text = "KILLS 0"
-	kills_label.add_theme_font_size_override("font_size", 22)
-	kills_label.anchor_left = 1.0
-	kills_label.anchor_right = 1.0
-	kills_label.offset_left = -180
-	kills_label.offset_right = -20
-	kills_label.offset_top = 16
-	kills_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	add_child(kills_label)
-
-	# crosshair (aim mode)
-	crosshair = ColorRect.new()
-	crosshair.color = Color(0.75, 0.9, 1.0, 0.95)
-	crosshair.anchor_left = 0.5
-	crosshair.anchor_top = 0.5
-	crosshair.anchor_right = 0.5
-	crosshair.anchor_bottom = 0.5
-	crosshair.offset_left = -3
-	crosshair.offset_top = -3
-	crosshair.offset_right = 3
-	crosshair.offset_bottom = 3
-	crosshair.visible = false
-	add_child(crosshair)
-
-	# damage vignette
-	vignette = ColorRect.new()
-	vignette.color = Color(0.6, 0.02, 0.03, 0.0)
-	vignette.set_anchors_preset(Control.PRESET_FULL_RECT)
-	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(vignette)
-
-	# controls hint
-	hint_label = Label.new()
-	hint_label.text = "WASD move · Mouse look · LMB attack · E heavy · F throw axe · R recall · RMB aim · Space dodge-roll · Shift sprint"
-	hint_label.add_theme_font_size_override("font_size", 15)
-	hint_label.anchor_left = 0.5
-	hint_label.anchor_right = 0.5
-	hint_label.anchor_top = 1.0
-	hint_label.anchor_bottom = 1.0
-	hint_label.offset_left = -460
-	hint_label.offset_right = 460
-	hint_label.offset_top = -52
-	hint_label.offset_bottom = -28
-	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	add_child(hint_label)
-	_fade_hint()
-
-	# game over
-	gameover_panel = CenterContainer.new()
-	gameover_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
-	gameover_panel.visible = false
-	var panel := PanelContainer.new()
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 12)
-	var title := Label.new()
-	title.text = "YOU DIED"
-	title.add_theme_font_size_override("font_size", 64)
-	title.add_theme_color_override("font_color", Color(0.75, 0.1, 0.12))
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(title)
-	var sub := Label.new()
-	sub.text = "Press R to rise again"
-	sub.add_theme_font_size_override("font_size", 22)
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vbox.add_child(sub)
-	panel.add_child(vbox)
-	gameover_panel.add_child(panel)
-	add_child(gameover_panel)
+	layer = 1
+	_painter = _Draw.new()
+	_painter.owner_ref = self
+	_painter.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_painter.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_painter)
 
 
-func _fade_hint() -> void:
-	await get_tree().create_timer(10.0).timeout
-	if not is_instance_valid(hint_label):
-		return
-	var tw := create_tween()
-	tw.tween_property(hint_label, "modulate:a", 0.0, 2.0)
+func bind(player: Player) -> void:
+	_rig = player.rig
+	player.health_changed.connect(_on_health)
+	player.axe.state_changed.connect(_on_axe_state)
 
 
-func set_hp(v: float, max_v: float) -> void:
-	hp_bar.max_value = max_v
-	hp_bar.value = v
-	# flash red vignette
-	vignette.color.a = 0.45
-	var tw := create_tween()
-	tw.tween_property(vignette, "color:a", 0.0, 0.5)
+func _on_health(cur: float, maximum: float) -> void:
+	var next: float = cur / maxf(maximum, 0.001)
+	if next < health:
+		hurt_flash = 1.0
+	health = next
 
 
-func set_wave(n: int) -> void:
-	wave_label.text = "WAVE %d" % n
+func _on_axe_state(s: int) -> void:
+	match s:
+		LeviathanAxe.State.EQUIPPED:
+			axe_label = "IN HAND"
+			axe_ready = true
+		LeviathanAxe.State.AIRBORNE_THROW:
+			axe_label = "IN FLIGHT"
+			axe_ready = false
+		LeviathanAxe.State.EMBEDDED_WORLD:
+			axe_label = "EMBEDDED"
+			axe_ready = false
+		LeviathanAxe.State.EMBEDDED_ENEMY:
+			axe_label = "IN THE BEAST"
+			axe_ready = false
+		LeviathanAxe.State.RECALLING:
+			axe_label = "RETURNING"
+			axe_ready = false
 
 
-func set_kills(n: int) -> void:
-	kills_label.text = "KILLS %d" % n
+func message(text: String, duration := 3.0) -> void:
+	_msg = text
+	_msg_t = duration
 
 
-func set_crosshair(v: bool) -> void:
-	crosshair.visible = v
+func _process(delta: float) -> void:
+	health_shown = move_toward(health_shown, health, delta * 0.55)
+	hurt_flash = maxf(0.0, hurt_flash - delta * 2.1)
+	_msg_t = maxf(0.0, _msg_t - delta)
+	aim_blend = _rig.aim_blend if _rig != null else 0.0
+	_painter.queue_redraw()
 
 
-func show_game_over() -> void:
-	gameover_panel.visible = true
+class _Draw extends Control:
+	var owner_ref
+
+	func _draw() -> void:
+		var o = owner_ref
+		if o == null:
+			return
+		var font := ThemeDB.fallback_font
+		var vp := size
+
+		# ---------------------------------------------------- damage vignette
+		if o.hurt_flash > 0.001:
+			var a: float = o.hurt_flash * 0.42
+			var band := 90.0
+			draw_rect(Rect2(0, 0, vp.x, band),
+					Color(RED.r, RED.g, RED.b, a * 0.8))
+			draw_rect(Rect2(0, vp.y - band, vp.x, band),
+					Color(RED.r, RED.g, RED.b, a * 0.8))
+			draw_rect(Rect2(0, 0, band * 0.7, vp.y),
+					Color(RED.r, RED.g, RED.b, a * 0.55))
+			draw_rect(Rect2(vp.x - band * 0.7, 0, band * 0.7, vp.y),
+					Color(RED.r, RED.g, RED.b, a * 0.55))
+
+		# ------------------------------------------------------- health bar
+		var bw := 340.0
+		var bh := 16.0
+		var bx := 36.0
+		var by := vp.y - 52.0
+		draw_rect(Rect2(bx - 2, by - 2, bw + 4, bh + 4), Color(0, 0, 0, 0.55))
+		# lagging "recent damage" bar in dark red behind the live one
+		draw_rect(Rect2(bx, by, bw * o.health_shown, bh),
+				Color(0.42, 0.06, 0.05, 0.95))
+		draw_rect(Rect2(bx, by, bw * o.health, bh), RED)
+		draw_rect(Rect2(bx, by, bw * o.health, 3.0),
+				Color(1.0, 0.45, 0.35, 0.65))
+		draw_string(font, Vector2(bx, by - 9.0), "VITALITY",
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(BONE, 0.75))
+
+		# -------------------------------------------------------- axe status
+		var ax := bx
+		var ay := by + bh + 26.0
+		var col: Color = RUNE if o.axe_ready else Color(0.62, 0.58, 0.52)
+		draw_circle(Vector2(ax + 7, ay - 5), 6.0, Color(col, 0.9))
+		draw_string(font, Vector2(ax + 22, ay), "LEVIATHAN  ·  " + o.axe_label,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(col, 0.95))
+		if not o.axe_ready:
+			draw_string(font, Vector2(ax + 22, ay + 20.0),
+					"press R to recall", HORIZONTAL_ALIGNMENT_LEFT, -1, 12,
+					Color(BONE, 0.5))
+
+		# ------------------------------------------------------ wave / kills
+		var top := ("PREPARE" if o.wave <= 0 else "WAVE %d" % o.wave)
+		var tw := font.get_string_size(top, HORIZONTAL_ALIGNMENT_LEFT,
+				-1, 26).x
+		draw_string(font, Vector2(vp.x * 0.5 - tw * 0.5, 52.0), top,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(BONE, 0.88))
+		var sub := ("the dead are stirring" if o.wave <= 0
+				else "%d draugr remain" % o.enemies_left)
+		var sw := font.get_string_size(sub, HORIZONTAL_ALIGNMENT_LEFT,
+				-1, 15).x
+		draw_string(font, Vector2(vp.x * 0.5 - sw * 0.5, 76.0), sub,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(BONE, 0.58))
+		draw_string(font, Vector2(vp.x - 150.0, 52.0), "SLAIN  %d" % o.kills,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(BONE, 0.62))
+
+		# --------------------------------------------------------- crosshair
+		if o.aim_blend > 0.01:
+			var c := vp * 0.5
+			var a2: float = o.aim_blend
+			var gap := 9.0
+			var len := 13.0 - 4.0 * a2
+			var cc := Color(RUNE, 0.30 + 0.60 * a2)
+			for d in [Vector2.UP, Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT]:
+				draw_line(c + d * gap, c + d * (gap + len), cc, 1.8, true)
+			draw_circle(c, 1.9, Color(1, 1, 1, 0.55 * a2))
+			draw_arc(c, gap + len + 7.0, 0, TAU, 32, Color(RUNE, 0.16 * a2),
+					1.2, true)
+
+		# ----------------------------------------------------------- message
+		if o._msg_t > 0.0 and o._msg != "":
+			var fade: float = clampf(o._msg_t, 0.0, 1.0)
+			var mw := font.get_string_size(o._msg, HORIZONTAL_ALIGNMENT_LEFT,
+					-1, 20).x
+			draw_string(font, Vector2(vp.x * 0.5 - mw * 0.5, vp.y * 0.30),
+					o._msg, HORIZONTAL_ALIGNMENT_LEFT, -1, 20,
+					Color(BONE, 0.30 + 0.60 * fade))
+
+		# -------------------------------------------------------- end screens
+		if o.game_over or o.victory:
+			draw_rect(Rect2(Vector2.ZERO, vp), Color(0, 0, 0, 0.62))
+			var title := "THE ALL-FATHER CLAIMS YOU"
+			var tint := RED
+			if o.victory:
+				title = "THE DEAD LIE STILL"
+				tint = RUNE
+			var big := 42
+			var w2 := font.get_string_size(title, HORIZONTAL_ALIGNMENT_LEFT,
+					-1, big).x
+			draw_string(font, Vector2(vp.x * 0.5 - w2 * 0.5, vp.y * 0.42),
+					title, HORIZONTAL_ALIGNMENT_LEFT, -1, big,
+					Color(tint, 0.95))
+			var line := "%d draugr slain  ·  reached wave %d" % [o.kills, o.wave]
+			var w3 := font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT,
+					-1, 18).x
+			draw_string(font, Vector2(vp.x * 0.5 - w3 * 0.5, vp.y * 0.42 + 38.0),
+					line, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(BONE, 0.75))
+			var hint := "press ENTER to rise again"
+			var w4 := font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT,
+					-1, 17).x
+			draw_string(font, Vector2(vp.x * 0.5 - w4 * 0.5, vp.y * 0.42 + 78.0),
+					hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(BONE, 0.6))
