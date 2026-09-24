@@ -35,6 +35,16 @@ controls appear automatically and no pointer capture is used.
 Survive six waves. The dodge roll grants full evasion for its duration, and a
 heavy blow always breaks a draugr out of its wind-up.
 
+On touch, **AIM** is a toggle and the **ATTACK** button relabels itself to
+**THROW** while aiming. Below, the axe is away and the HUD reads
+`LEVIATHAN · EMBEDDED`:
+
+![throwing](docs/axe_embedded.png)
+
+Touch controls, shown on the live build:
+
+![touch](docs/touch_controls.png)
+
 ---
 
 ## The axe
