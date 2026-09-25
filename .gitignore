@@ -1,0 +1,16 @@
+# Godot 4 editor/import cache
+.godot/
+*.import.tmp
+
+# Export output (published to the gh-pages branch instead)
+build/
+
+# Asset pipeline scratch
+/opt_tmp/
+__pycache__/
+*.pyc
+
+
+# Generated visual-QA corpus (1,000 frames + reports/contact sheets)
+artifacts/visual_qa/
+artifacts/actor_gallery.png

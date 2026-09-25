@@ -1,0 +1,255 @@
+{
+  "schema": 1,
+  "assets": [
+    {
+      "id": "kaykit_adventurers_1_0",
+      "url": "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0/archive/672074b73ba276876a19e8816ecdc5241817ab47.zip",
+      "page": "https://kaylousberg.itch.io/kaykit-adventurers",
+      "file": "kaykit_adventurers.zip",
+      "license": "CC0-1.0",
+      "creator": "Kay Lousberg (KayKit)",
+      "bytes": 6147593,
+      "sha256": "00777a7b9811a7c7f8dd3fda4e56604f6a93b33673d64557153f354d677b47af"
+    },
+    {
+      "id": "kaykit_skeletons_1_0",
+      "url": "https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0/archive/15b62b9bad122f72926c10fb14d622c73819fa54.zip",
+      "page": "https://kaylousberg.itch.io/kaykit-skeletons",
+      "file": "kaykit_skeletons.zip",
+      "license": "CC0-1.0",
+      "creator": "Kay Lousberg (KayKit)",
+      "bytes": 6661120,
+      "sha256": "2e3e1107009fcb1ff4b2bccfe91c7e823264e267f20124438916f21a2d6b8e6f"
+    },
+    {
+      "id": "kaykit_dungeon_remastered_1_0",
+      "url": "https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0/archive/refs/heads/main.zip",
+      "page": "https://kaylousberg.itch.io/kaykit-dungeon-pack",
+      "file": "kaykit_dungeon.zip",
+      "license": "CC0-1.0",
+      "creator": "Kay Lousberg (KayKit)",
+      "bytes": 6312130,
+      "sha256": "8e92aa460f5be4252dff0cf030f92846ab74b875ce4756076ecce75b5d0c9bee"
+    },
+    {
+      "id": "kenney_castle_2_0",
+      "url": "https://kenney.nl/media/pages/assets/castle-kit/a395102d20-1711543616/kenney_castle-kit.zip",
+      "page": "https://kenney.nl/assets/castle-kit",
+      "file": "kenney_castle.zip",
+      "license": "CC0-1.0",
+      "creator": "Kenney",
+      "bytes": 2232589,
+      "sha256": "921f3f73927bb23106cae34bc21d5ab4b033a9fc120475e96f714a406e3169df"
+    },
+    {
+      "id": "kenney_graveyard_5_0",
+      "url": "https://kenney.nl/media/pages/assets/graveyard-kit/ba8d4b4517-1760691807/kenney_graveyard-kit_5.0.zip",
+      "page": "https://kenney.nl/assets/graveyard-kit",
+      "file": "kenney_graveyard.zip",
+      "license": "CC0-1.0",
+      "creator": "Kenney",
+      "bytes": 3623408,
+      "sha256": "1a93613f2e5675f3310acf49ec9ef13ae7adeb756ac3b205bfb6cc9311a81062"
+    },
+    {
+      "id": "kenney_nature_1_0",
+      "url": "https://kenney.nl/media/pages/assets/nature-kit/37ac38a37b-1677698939/kenney_nature-kit.zip",
+      "page": "https://kenney.nl/assets/nature-kit",
+      "file": "kenney_nature.zip",
+      "license": "CC0-1.0",
+      "creator": "Kenney",
+      "bytes": 10537521,
+      "sha256": "fa7974a0d342bfe63c38664ba9f8ec1a4aab8ea25f099bdc56870e33588c4d9d"
+    },
+    {
+      "id": "kenney_particle_pack",
+      "url": "https://kenney.nl/media/pages/assets/particle-pack/f8fe0f8cb8-1677578741/kenney_particle-pack.zip",
+      "page": "https://kenney.nl/assets/particle-pack",
+      "file": "kenney_particles.zip",
+      "license": "CC0-1.0",
+      "creator": "Kenney",
+      "bytes": 15001764,
+      "sha256": "b631d4b07f7002549fdcf155f01141ad482f79f3440e4e301eed49ce5f1d8958"
+    },
+    {
+      "id": "kenney_splat_pack",
+      "url": "https://kenney.nl/media/pages/assets/splat-pack/1070534984-1677495350/kenney_splat-pack.zip",
+      "page": "https://kenney.nl/assets/splat-pack",
+      "file": "kenney_splats.zip",
+      "license": "CC0-1.0",
+      "creator": "Kenney",
+      "bytes": 351719,
+      "sha256": "cf50b2671c48fd5b957e249447c9b0dff63c878a538c8e38af282b51f1571925"
+    },
+    {
+      "id": "kenney_ui_adventure",
+      "url": "https://kenney.nl/media/pages/assets/ui-pack-adventure/9a877376bc-1723597274/kenney_ui-pack-adventure.zip",
+      "page": "https://kenney.nl/assets/ui-pack-adventure",
+      "file": "kenney_ui_adventure.zip",
+      "license": "CC0-1.0",
+      "creator": "Kenney",
+      "bytes": 577463,
+      "sha256": "982e8ab66842509ee9214f9c2038e594cbe029f19d1dc177fecaad3b41a67ed3"
+    },
+    {
+      "id": "kenney_fantasy_ui_borders",
+      "url": "https://kenney.nl/media/pages/assets/fantasy-ui-borders/ab29cd0165-1701602367/kenney_fantasy-ui-borders.zip",
+      "page": "https://kenney.nl/assets/fantasy-ui-borders",
+      "file": "kenney_ui_borders.zip",
+      "license": "CC0-1.0",
+      "creator": "Kenney",
+      "bytes": 358780,
+      "sha256": "59532da3bd61195a425585455b40baa6cbf1eda8227c42adcef31a535a737769"
+    },
+    {
+      "id": "kenney_game_icons",
+      "url": "https://kenney.nl/media/pages/assets/game-icons/1ebf9c14af-1677661579/kenney_game-icons.zip",
+      "page": "https://kenney.nl/assets/game-icons",
+      "file": "kenney_icons.zip",
+      "license": "CC0-1.0",
+      "creator": "Kenney",
+      "bytes": 1045980,
+      "sha256": "7a86d8d58e0b851e22004b3c70bf90b003632bbf9ac633424daa3bb17d9e7e4e"
+    },
+    {
+      "id": "kenney_rpg_audio",
+      "url": "https://kenney.nl/media/pages/assets/rpg-audio/8e99002d76-1677590336/kenney_rpg-audio.zip",
+      "page": "https://kenney.nl/assets/rpg-audio",
+      "file": "kenney_rpg_audio.zip",
+      "license": "CC0-1.0",
+      "creator": "Kenney",
+      "bytes": 964837,
+      "sha256": "6dbeaf8544da958d8f2adcb4a4a4b76c1ade34a05f8ab9edccd327da7375f38b"
+    },
+    {
+      "id": "kenney_impact_sounds",
+      "url": "https://kenney.nl/media/pages/assets/impact-sounds/87b4ddecda-1677589768/kenney_impact-sounds.zip",
+      "page": "https://kenney.nl/assets/impact-sounds",
+      "file": "kenney_impacts.zip",
+      "license": "CC0-1.0",
+      "creator": "Kenney",
+      "bytes": 800850,
+      "sha256": "029d734af1582474edf3a694d1b0cebc97c1c152f2f39fa34d4c2bafc5de77f8"
+    },
+    {
+      "id": "rubberduck_80_rpg_sfx",
+      "url": "https://opengameart.org/sites/default/files/80-CC0-RPG-SFX_0.zip",
+      "page": "https://opengameart.org/content/80-cc0-rpg-sfx",
+      "file": "rubberduck_rpg_sfx.zip",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "bytes": 1845114,
+      "sha256": "1c2f06ff4e8563b5b8b745b23cf213c1474142a69bb82bd8f5e10d9b3f7a7bbd"
+    },
+    {
+      "id": "artisticdude_swishes",
+      "url": "https://opengameart.org/sites/default/files/swishes.zip",
+      "page": "https://opengameart.org/content/swishes-sound-pack",
+      "file": "swishes.zip",
+      "license": "CC0-1.0",
+      "creator": "artisticdude",
+      "bytes": 385150,
+      "sha256": "7980215241b739a787dcf26f660ce510bb237900968789395a86911619795693"
+    },
+    {
+      "id": "cynic_battle_loop",
+      "url": "https://opengameart.org/sites/default/files/cynicbattleloop.ogg",
+      "page": "https://opengameart.org/content/cynic-battle-loop",
+      "file": "cynicbattleloop.ogg",
+      "license": "CC0-1.0",
+      "creator": "Ferk / Alex Smith",
+      "bytes": 1861815,
+      "sha256": "39195451e23c929dce5bed687b0d78454c32eb574b06713ea3d079b6b37b6a86"
+    },
+    {
+      "id": "viking_march",
+      "url": "https://opengameart.org/sites/default/files/viking-march.ogg",
+      "page": "https://opengameart.org/content/viking-march",
+      "file": "viking-march.ogg",
+      "license": "CC0-1.0",
+      "creator": "nightm4re",
+      "bytes": 998313,
+      "sha256": "275f8928ac84ee4edf6fad9b92ed7123f9070d6966818109d20dc51a581ff35a"
+    },
+    {
+      "id": "winter_wind",
+      "url": "https://opengameart.org/sites/default/files/winter-wind-short.mp3",
+      "page": "https://opengameart.org/content/winter-wind",
+      "file": "winter-wind-short.mp3",
+      "license": "CC0-1.0",
+      "creator": "qubodup",
+      "bytes": 611600,
+      "sha256": "a7d231363d91fc93dde735f76004e76f4feb25c1fe824fc4754d9ec216051411"
+    },
+    {
+      "id": "fire_crackle",
+      "url": "https://opengameart.org/sites/default/files/fire-1.ogg",
+      "page": "https://opengameart.org/content/fire-crackling",
+      "file": "fire-1.ogg",
+      "license": "CC0-1.0",
+      "creator": "qubodup",
+      "bytes": 22784,
+      "sha256": "f922929805bc6afdf0a35727fa3998033db544c1b6f62ed3aeab94341ed6ddeb"
+    },
+    {
+      "id": "google_font_cinzel",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/cinzel/Cinzel%5Bwght%5D.ttf",
+      "page": "https://fonts.google.com/specimen/Cinzel",
+      "file": "Cinzel-Variable.ttf",
+      "license": "OFL-1.1",
+      "creator": "Natanael Gama / Google Fonts",
+      "bytes": 125468,
+      "sha256": "f4d83d34d1f6c741193e4acf4b3dff9531e5a67b6aa65228d00a7db72a4e0f34"
+    },
+    {
+      "id": "google_font_alegreya_sans",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/alegreyasans/AlegreyaSans-Regular.ttf",
+      "page": "https://fonts.google.com/specimen/Alegreya+Sans",
+      "file": "AlegreyaSans-Regular.ttf",
+      "license": "OFL-1.1",
+      "creator": "Huerta Tipografica / Google Fonts",
+      "bytes": 263804,
+      "sha256": "8fab634196007afca839f1e5a6fb300976daff55d8528b590ef032f01b14ea10"
+    },
+    {
+      "id": "google_font_noto_runic",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansrunic/NotoSansRunic-Regular.ttf",
+      "page": "https://fonts.google.com/noto/specimen/Noto+Sans+Runic",
+      "file": "NotoSansRunic-Regular.ttf",
+      "license": "OFL-1.1",
+      "creator": "Google Fonts",
+      "bytes": 55800,
+      "sha256": "615b6c1166a8c51816dc1536784acbf486547e3bed03dbfdd70910e10066793b"
+    },
+    {
+      "id": "google_font_cinzel_ofl",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/cinzel/OFL.txt",
+      "page": "https://github.com/google/fonts/tree/main/ofl/cinzel",
+      "file": "OFL-Cinzel.txt",
+      "license": "OFL-1.1",
+      "creator": "SIL",
+      "bytes": 4383,
+      "sha256": "f2b3029aba64c378bf0963b62945eee15e564fe4330b934c8f2eb058282b5e83"
+    },
+    {
+      "id": "google_font_alegreya_ofl",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/alegreyasans/OFL.txt",
+      "page": "https://github.com/google/fonts/tree/main/ofl/alegreyasans",
+      "file": "OFL-AlegreyaSans.txt",
+      "license": "OFL-1.1",
+      "creator": "SIL",
+      "bytes": 4405,
+      "sha256": "0677891e6a143f297350d260ad766ad33bfc18ed5fa4f213acf648d6b597ec1a"
+    },
+    {
+      "id": "google_font_runic_ofl",
+      "url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansrunic/OFL.txt",
+      "page": "https://github.com/google/fonts/tree/main/ofl/notosansrunic",
+      "file": "OFL-NotoSansRunic.txt",
+      "license": "OFL-1.1",
+      "creator": "SIL",
+      "bytes": 4381,
+      "sha256": "b0fbcb9eaf0f5f415358bfefa5999ee75e18cde4a275b78285b2140a9e381865"
+    }
+  ]
+}
