@@ -128,8 +128,8 @@ func _physics_process(delta: float) -> void:
 				_check(draugr.health < _enemy_hp_before,
 						"throw damages the draugr",
 						"%.0f -> %.0f" % [_enemy_hp_before, draugr.health])
-				_check(_is_descendant_of(axe, draugr),
-						"axe re-parents onto the draugr body")
+				_check(not _is_descendant_of(axe, draugr) and axe.get_parent() == self,
+						"embedded axe remains world-owned (corpse-safe)")
 				_next(8)
 			elif _phase_frames > 300:
 				_check(false, "axe embeds in the draugr", "never connected")

@@ -39,6 +39,8 @@ func _process(delta: float) -> void:
 
 ## Freeze time briefly. `scale` 0.05 for 0.08s is the heavy-impact default.
 func hit_stop(scale: float = 0.05, duration: float = 0.08) -> void:
+	if not Settings.hit_stop_enabled:
+		return
 	_stop_token += 1
 	var token := _stop_token
 	Engine.time_scale = clampf(scale, 0.01, 1.0)
@@ -68,7 +70,7 @@ func impact(strength: float, direction: Vector3 = Vector3.ZERO,
 func shake_sample(intensity_scale: float = 1.0) -> Array:
 	if trauma <= 0.0:
 		return [Vector3.ZERO, 0.0]
-	var mag := trauma * trauma * intensity_scale
+	var mag := trauma * trauma * intensity_scale * Settings.shake_scale
 	var ox := _noise.get_noise_2d(_noise_t, 0.0)
 	var oy := _noise.get_noise_2d(0.0, _noise_t)
 	var oz := _noise.get_noise_2d(_noise_t, _noise_t)

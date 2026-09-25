@@ -18,6 +18,7 @@ const STICK_DEADZONE := 0.14
 const LOOK_SENS := 1.05
 
 var enabled := false
+var input_allowed := false
 
 var _painter: Control
 var _buttons: Array = []
@@ -87,9 +88,27 @@ func _button_pos(b: Dictionary) -> Vector2:
 	return v + (b["offset"] as Vector2)
 
 
+func set_input_allowed(allowed: bool) -> void:
+	input_allowed = allowed
+	visible = enabled and allowed
+	if not allowed:
+		_stick_idx = -1
+		_look_idx = -1
+		_stick_vec = Vector2.ZERO
+		_aim_on = false
+		for button in _buttons:
+			button["pressed"] = false
+			button["idx"] = -1
+		Boot.reset_virtual_input()
+		if _painter != null:
+			_painter.queue_redraw()
+
+
 # --------------------------------------------------------------------- input
 
 func _input(event: InputEvent) -> void:
+	if not input_allowed:
+		return
 	if event is InputEventScreenTouch:
 		if not enabled:
 			_activate()

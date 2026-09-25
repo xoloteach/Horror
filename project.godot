@@ -17,6 +17,7 @@ boot_splash/show_image=false
 Boot="*res://scripts/boot.gd"
 Juice="*res://scripts/juice.gd"
 Sfx="*res://scripts/sfx.gd"
+Settings="*res://scripts/settings.gd"
 
 [display]
 

@@ -1,77 +1,98 @@
 class_name Player
 extends CharacterBody3D
-## Nordic warrior: movement, dodge roll, melee combo, axe throw/recall, and a
-## fully procedural animation layer driven off the glTF pivot hierarchy.
+## Production player controller driven by KayKit's authored Skeleton3D clips.
 ##
-## The body itself never rotates -- only `model` does. That keeps the camera rig
-## (a child of the body) free of the character's turning and rolling, so aiming
-## stays stable while the warrior spins underneath it.
+## Gameplay owns movement/combat timing; the view consumes semantic states. Hit
+## windows trace the animated axe between its previous/current blade positions
+## and reject targets hidden behind world geometry. Light inputs buffer into a
+## three-hit chain instead of being discarded during an active attack.
 
 signal health_changed(current: float, maximum: float)
+signal focus_changed(current: float, maximum: float)
 signal died
+signal combo_changed(step: int)
+signal perfect_dodge
 
-enum St { IDLE, ATTACK, DODGE, HURT, DEAD }
+const MODEL := preload("res://assets/production/actors/Barbarian.glb")
+const SHIELD := preload("res://assets/production/weapons/shield_round_barbarian.gltf")
 
-const MAX_HEALTH := 100.0
+enum State { MOVE, ATTACK, DODGE, HURT, RECALL, CATCH, DEAD }
+enum AttackKind { NONE, LIGHT, HEAVY, THROW }
 
-const SPEED := 5.6
-const AIM_SPEED := 2.7
-const ACCEL := 14.0
-const DECEL := 17.0
+const BASE_MAX_HEALTH := 125.0
+const BASE_MAX_FOCUS := 100.0
+const SPEED := 6.2
+const AIM_SPEED := 3.1
+const ACCEL := 19.0
+const DECEL := 22.0
 const GRAVITY := 24.0
-const TURN_SPEED := 13.0
+const TURN_SPEED := 15.0
+const CAP_HEIGHT := 1.68
+const CAP_RADIUS := 0.34
 
-const DODGE_SPEED := 10.5
-const DODGE_TIME := 0.42
-const DODGE_COOLDOWN := 0.22
+const DODGE_SPEED := 11.8
+const DODGE_TIME := 0.48
+const DODGE_COOLDOWN := 0.20
+const DODGE_INVULN_START := 0.07
+const DODGE_INVULN_END := 0.36
 
-const ATTACK_TIME_LIGHT := 0.52
-const ATTACK_TIME_HEAVY := 0.78
-const DAMAGE_LIGHT := 18.0
-const DAMAGE_HEAVY := 34.0
-const DAMAGE_UNARMED := 9.0
-const REACH := 2.45
-const ARC_COS := 0.32   # ~70 degrees to either side
+const LIGHT_DURATIONS := [0.48, 0.52, 0.62]
+const LIGHT_CLIPS := [
+	"1H_Melee_Attack_Slice_Diagonal",
+	"1H_Melee_Attack_Slice_Horizontal",
+	"1H_Melee_Attack_Chop",
+]
+const LIGHT_WINDOWS := [Vector2(0.27, 0.52), Vector2(0.26, 0.54), Vector2(0.31, 0.60)]
+const HEAVY_DURATION := 0.82
+const THROW_DURATION := 0.70
+const DAMAGE_LIGHT := [18.0, 21.0, 28.0]
+const DAMAGE_HEAVY := 46.0
+const DAMAGE_HEAVY_UNPOWERED := 34.0
+const HEAVY_FOCUS_COST := 24.0
+const DAMAGE_UNARMED := 10.0
+const MELEE_RANGE := 3.1
+const HIT_RADIUS := 0.88
 
-const CAP_HEIGHT := 1.76
-const CAP_RADIUS := 0.30
-const MODEL_Y := 0.04   # glb feet sit 4cm below its origin
-
-var state: St = St.IDLE
-var health := MAX_HEALTH
+var state: State = State.MOVE
+var attack_kind: AttackKind = AttackKind.NONE
+var health := BASE_MAX_HEALTH
+var max_health := BASE_MAX_HEALTH
+var focus := BASE_MAX_FOCUS
+var max_focus := BASE_MAX_FOCUS
+var damage_multiplier := 1.0
+var control_enabled := true
 
 var model: Node3D
+var animation_player: AnimationPlayer
+var skeleton: Skeleton3D
 var rig: CameraRig
 var axe: LeviathanAxe
 var hand: Node3D
 
-var _limbs := {}
-var _rest := {}
-var _facing := 0.0
-
-var _walk_phase := 0.0
-var _step_flag := false
-var _breathe := 0.0
-
-var _atk_t := 0.0
-var _atk_dur := ATTACK_TIME_LIGHT
-var _atk_heavy := false
-var _atk_side := 1
-var _atk_hits: Array = []
-
-var _dodge_t := 0.0
-var _dodge_cd := 0.0
-var _dodge_dir := Vector3.FORWARD
-
-var _hurt_t := 0.0
 var _world_root: Node3D
+var _facing := 0.0
+var _current_animation: StringName = &""
+var _locomotion_phase := 0.0
+var _step_side := false
 
-const LIMB_NAMES := [
-	"Hips", "ChestPivot", "NeckPivot", "HeadPivot",
-	"Shoulder_R", "UpperArm_R", "Forearm_R", "Hand_R",
-	"Shoulder_L", "UpperArm_L", "Forearm_L", "Hand_L",
-	"Thigh_R", "Shin_R", "Thigh_L", "Shin_L",
-]
+var _attack_time := 0.0
+var _attack_duration := 0.5
+var _combo_step := 0
+var _combo_timeout := 0.0
+var _queued_kind: AttackKind = AttackKind.NONE
+var _attack_hits: Array[Node] = []
+var _active_started := false
+var _pending_throw_target := Vector3.ZERO
+var _throw_released := false
+var _empowered_heavy := false
+var _previous_blade := Vector3.ZERO
+var _attack_target_ref: WeakRef
+
+var _dodge_time := 0.0
+var _dodge_cooldown := 0.0
+var _dodge_direction := Vector3.FORWARD
+var _hurt_time := 0.0
+var _catch_time := 0.0
 
 
 func _ready() -> void:
@@ -79,141 +100,235 @@ func _ready() -> void:
 	collision_mask = 1 | 4
 	_world_root = get_parent() as Node3D
 
-	var shape := CollisionShape3D.new()
-	var cap := CapsuleShape3D.new()
-	cap.radius = CAP_RADIUS
-	cap.height = CAP_HEIGHT
-	shape.shape = cap
-	shape.position = Vector3(0, CAP_HEIGHT * 0.5, 0)
-	add_child(shape)
+	var collision := CollisionShape3D.new()
+	var capsule := CapsuleShape3D.new()
+	capsule.radius = CAP_RADIUS
+	capsule.height = CAP_HEIGHT
+	collision.shape = capsule
+	collision.position = Vector3(0, CAP_HEIGHT * 0.5, 0)
+	add_child(collision)
 
-	model = load("res://assets/models/player.glb").instantiate()
-	model.position = Vector3(0, MODEL_Y, 0)
+	model = MODEL.instantiate()
+	model.name = "BarbarianVisual"
 	add_child(model)
-	_bind_limbs()
+	_tune_model(model)
+	animation_player = _find_animation_player(model)
+	skeleton = _find_skeleton(model)
+	if animation_player == null or skeleton == null:
+		push_error("Player production actor is missing AnimationPlayer/Skeleton3D")
+		return
+
+	hand = _bone_socket("handslot.r", "AxeSocket")
+	var shield_socket := _bone_socket("handslot.l", "ShieldSocket")
+	var shield: Node3D = SHIELD.instantiate()
+	shield.name = "GuardianShield"
+	shield.scale = Vector3.ONE * 0.90
+	shield_socket.add_child(shield)
 
 	rig = CameraRig.new()
 	rig.name = "CameraRig"
-	rig.position = Vector3(0, 1.42, 0)
+	rig.position = Vector3(0, 1.30, 0)
 	add_child(rig)
 
-	hand = _limbs.get("Hand_R")
-	var socket := model.find_child("WeaponSocket_R", true, false)
-	if socket != null:
-		hand = socket
-
 	axe = LeviathanAxe.new()
-	axe.name = "Axe"
+	axe.name = "LeviathanAxe"
 	hand.add_child(axe)
 	axe.setup(self, hand, _world_root)
+	axe.caught.connect(_on_axe_caught)
 
-	health_changed.emit(health, MAX_HEALTH)
-
-
-func _bind_limbs() -> void:
-	for n in LIMB_NAMES:
-		var node := model.find_child(n, true, false)
-		if node is Node3D:
-			_limbs[n] = node
-			_rest[n] = (node as Node3D).rotation
-		else:
-			push_warning("Player: limb not found -> %s" % n)
+	_play_animation("Idle", 0.0, 1.0)
+	health_changed.emit(health, max_health)
+	focus_changed.emit(focus, max_focus)
 
 
-func _rot(name: String, euler: Vector3, weight := 1.0) -> void:
-	var n: Node3D = _limbs.get(name)
-	if n == null:
-		return
-	var rest: Vector3 = _rest[name]
-	n.rotation = rest + euler * weight
+func _tune_model(node: Node) -> void:
+	if node is GeometryInstance3D:
+		(node as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	if node is MeshInstance3D:
+		var mesh_node := node as MeshInstance3D
+		for surface in mesh_node.get_surface_override_material_count():
+			var source := mesh_node.get_active_material(surface)
+			if source is StandardMaterial3D:
+				var material := source.duplicate() as StandardMaterial3D
+				# Cool the bright source palette into weathered iron/leather while
+				# preserving the authored atlas detail and skin contrast.
+				material.albedo_color *= Color(0.78, 0.84, 0.94, 1.0)
+				material.roughness = maxf(material.roughness, 0.55)
+				mesh_node.set_surface_override_material(surface, material)
+	for child in node.get_children():
+		_tune_model(child)
+
+
+func _find_animation_player(root: Node) -> AnimationPlayer:
+	if root is AnimationPlayer:
+		return root
+	for child in root.get_children():
+		var found := _find_animation_player(child)
+		if found != null:
+			return found
+	return null
+
+
+func _find_skeleton(root: Node) -> Skeleton3D:
+	if root is Skeleton3D:
+		return root
+	for child in root.get_children():
+		var found := _find_skeleton(child)
+		if found != null:
+			return found
+	return null
+
+
+func _bone_socket(bone: StringName, socket_name: String) -> BoneAttachment3D:
+	var attachment := BoneAttachment3D.new()
+	attachment.name = socket_name
+	attachment.bone_name = bone
+	skeleton.add_child(attachment)
+	return attachment
 
 
 # --------------------------------------------------------------------- input
 
 func _unhandled_input(event: InputEvent) -> void:
-	if state == St.DEAD:
+	if not control_enabled or state == State.DEAD:
 		return
-	# On touch devices there is no pointer to capture, so skip the capture
-	# handshake entirely and let the virtual buttons drive the action events.
 	if event is InputEventMouseButton and event.pressed and not Boot.touch_active:
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 			return
 	if event.is_action_pressed("ui_release") and not Boot.touch_active:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-
 	if not Boot.input_unlocked():
 		return
 
 	if event.is_action_pressed("attack_light"):
-		if rig.aim_blend > 0.55 and axe.can_throw():
-			_throw_axe()
+		if Input.is_action_pressed("aim") and axe.can_throw():
+			_start_throw()
 		else:
-			_start_attack(false)
+			_request_attack(AttackKind.LIGHT)
 	elif event.is_action_pressed("attack_heavy"):
-		_start_attack(true)
+		_request_attack(AttackKind.HEAVY)
 	elif event.is_action_pressed("recall") or event.is_action_pressed("recall_mouse"):
-		if axe.can_recall():
-			axe.recall()
+		_start_recall()
 	elif event.is_action_pressed("dodge"):
 		_start_dodge()
 
 
-func _throw_axe() -> void:
-	var exclude: Array[RID] = [get_rid()]
-	var target := rig.aim_point(70.0, exclude)
-	axe.throw(hand.global_position, target)
-	_atk_t = 0.0
-	_atk_dur = 0.34
-	_atk_heavy = false
-	_atk_side = 1
-	_atk_hits.clear()
-	state = St.ATTACK
-	Sfx.play_3d("grunt", global_position + Vector3.UP * 1.4, -3.0)
-
-
-func _start_attack(heavy: bool) -> void:
-	if state in [St.ATTACK, St.DODGE, St.DEAD]:
+func _request_attack(kind: AttackKind) -> void:
+	if state == State.ATTACK:
+		if attack_kind != AttackKind.THROW and _attack_time / _attack_duration >= 0.36:
+			_queued_kind = kind
 		return
-	_atk_heavy = heavy
-	_atk_dur = ATTACK_TIME_HEAVY if heavy else ATTACK_TIME_LIGHT
-	_atk_t = 0.0
-	_atk_side = -_atk_side
-	_atk_hits.clear()
-	state = St.ATTACK
-	Sfx.play_3d("swing_heavy" if heavy else "swing",
-			global_position + Vector3.UP * 1.3, -1.0)
-	if heavy:
-		Sfx.play_3d("grunt", global_position + Vector3.UP * 1.4, -4.0)
+	if state in [State.DODGE, State.HURT, State.RECALL, State.CATCH, State.DEAD]:
+		return
+	_begin_attack(kind)
+
+
+func _begin_attack(kind: AttackKind) -> void:
+	state = State.ATTACK
+	attack_kind = kind
+	_attack_time = 0.0
+	_attack_hits.clear()
+	_active_started = false
+	_throw_released = false
+	_previous_blade = axe.edge_world_position() if axe != null else global_position
+	_attack_target_ref = null
+	var assisted := _best_assist_target()
+	if assisted != null:
+		_attack_target_ref = weakref(assisted)
+
+	if kind == AttackKind.LIGHT:
+		if _combo_timeout <= 0.0:
+			_combo_step = 0
+		_attack_duration = LIGHT_DURATIONS[_combo_step]
+		_play_timed(LIGHT_CLIPS[_combo_step], _attack_duration, 0.06)
+		Sfx.play_3d("swing", global_position + Vector3.UP * 1.15, -1.0,
+				1.0 + _combo_step * 0.03)
+		rig.add_fov_kick(0.75 + _combo_step * 0.22)
+		combo_changed.emit(_combo_step + 1)
+	elif kind == AttackKind.HEAVY:
+		_attack_duration = HEAVY_DURATION
+		_empowered_heavy = focus >= HEAVY_FOCUS_COST
+		if _empowered_heavy:
+			focus -= HEAVY_FOCUS_COST
+			focus_changed.emit(focus, max_focus)
+		_play_timed("2H_Melee_Attack_Chop", _attack_duration, 0.08)
+		Sfx.play_3d("swing_heavy", global_position + Vector3.UP * 1.15, 1.5)
+		Sfx.play_3d("grunt", global_position + Vector3.UP * 1.35, -3.0)
+		rig.add_fov_kick(2.2)
+
+
+func _start_throw() -> void:
+	if state in [State.ATTACK, State.DODGE, State.HURT, State.RECALL, State.CATCH, State.DEAD]:
+		return
+	var exclude: Array[RID] = [get_rid()]
+	_pending_throw_target = rig.aim_point(70.0, exclude)
+	state = State.ATTACK
+	attack_kind = AttackKind.THROW
+	_attack_time = 0.0
+	_attack_duration = THROW_DURATION
+	_attack_hits.clear()
+	_throw_released = false
+	_play_timed("Throw", THROW_DURATION, 0.05)
+	rig.add_fov_kick(1.35)
+	Sfx.play_3d("grunt", global_position + Vector3.UP * 1.35, -4.0)
+
+
+func _start_recall() -> void:
+	if not axe.can_recall() or state in [State.DODGE, State.HURT, State.DEAD]:
+		return
+	axe.recall()
+	state = State.RECALL
+	attack_kind = AttackKind.NONE
+	_play_animation("Block", 0.10, 1.15)
+
+
+func _on_axe_caught() -> void:
+	if state == State.DEAD:
+		return
+	state = State.CATCH
+	_catch_time = 0.34
+	rig.add_fov_kick(1.6)
+	_play_timed("Block_Hit", _catch_time, 0.02)
 
 
 func _start_dodge() -> void:
-	if state in [St.DODGE, St.DEAD] or _dodge_cd > 0.0:
+	if state in [State.DODGE, State.HURT, State.DEAD] or _dodge_cooldown > 0.0:
 		return
-	var wish := _wish_dir()
+	var wish := _wish_direction()
 	if wish.length_squared() < 0.01:
-		wish = -Vector3(sin(_facing), 0, cos(_facing))
-	_dodge_dir = wish.normalized()
-	_dodge_t = 0.0
-	_dodge_cd = DODGE_TIME + DODGE_COOLDOWN
-	state = St.DODGE
-	Sfx.play_3d("dodge", global_position + Vector3.UP, -2.0)
+		wish = _forward()
+	_dodge_direction = wish.normalized()
+	_dodge_time = 0.0
+	_dodge_cooldown = DODGE_TIME + DODGE_COOLDOWN
+	state = State.DODGE
+	attack_kind = AttackKind.NONE
+	_queued_kind = AttackKind.NONE
+
+	var local_direction := model.global_transform.basis.inverse() * _dodge_direction
+	var clip := "Dodge_Forward"
+	if absf(local_direction.x) > absf(local_direction.z):
+		clip = "Dodge_Right" if local_direction.x > 0 else "Dodge_Left"
+	elif local_direction.z > 0.15:
+		clip = "Dodge_Backward"
+	_play_timed(clip, DODGE_TIME, 0.04)
+	Sfx.play_3d("dodge", global_position + Vector3.UP, -1.0)
 
 
-func _wish_dir() -> Vector3:
-	# merged keyboard + virtual thumbstick
-	var iv := Boot.move_axis()
-	if iv.length_squared() < 0.0004:
+func _wish_direction() -> Vector3:
+	var input := Boot.move_axis()
+	if input.length_squared() < 0.0004:
 		return Vector3.ZERO
-	# forward on screen = away from camera
-	return (rig.flat_forward() * -iv.y + rig.flat_right() * iv.x).normalized()
+	return (rig.flat_forward() * -input.y + rig.flat_right() * input.x).normalized()
 
 
-# ------------------------------------------------------------------ simulation
+# ---------------------------------------------------------------- simulation
 
 func _physics_process(delta: float) -> void:
-	_dodge_cd = maxf(0.0, _dodge_cd - delta)
-	var aiming := Input.is_action_pressed("aim") and state != St.DEAD \
+	_dodge_cooldown = maxf(0.0, _dodge_cooldown - delta)
+	_combo_timeout = maxf(0.0, _combo_timeout - delta)
+	focus = minf(max_focus, focus + delta * 8.0)
+	var aiming := control_enabled and Input.is_action_pressed("aim") and state != State.DEAD \
 			and Boot.input_unlocked()
 	rig.set_aiming(aiming)
 
@@ -223,261 +338,366 @@ func _physics_process(delta: float) -> void:
 		velocity.y = maxf(velocity.y, -0.1)
 
 	match state:
-		St.DODGE:
-			_sim_dodge(delta)
-		St.ATTACK:
-			_sim_attack(delta, aiming)
-		St.HURT:
-			_sim_hurt(delta)
-		St.DEAD:
-			velocity.x = move_toward(velocity.x, 0.0, DECEL * delta)
-			velocity.z = move_toward(velocity.z, 0.0, DECEL * delta)
+		State.DODGE:
+			_simulate_dodge(delta)
+		State.ATTACK:
+			_simulate_attack(delta, aiming)
+		State.HURT:
+			_simulate_hurt(delta)
+		State.RECALL:
+			_simulate_recall(delta)
+		State.CATCH:
+			_simulate_catch(delta)
+		State.DEAD:
+			_brake(delta)
 		_:
-			_sim_move(delta, aiming)
+			_simulate_move(delta, aiming)
 
 	move_and_slide()
-	_animate(delta, aiming)
+	# KayKit characters are authored facing +Z; gameplay forward is -Z.
+	model.rotation.y = _facing + PI
+	_update_locomotion_animation(delta, aiming)
 
 
-func _sim_move(delta: float, aiming: bool) -> void:
-	var wish := _wish_dir()
-	var top := AIM_SPEED if aiming else SPEED
+func _simulate_move(delta: float, aiming: bool) -> void:
+	var wish := _wish_direction() if control_enabled else Vector3.ZERO
+	var top_speed := AIM_SPEED if aiming else SPEED
 	var flat := Vector3(velocity.x, 0, velocity.z)
 	if wish.length_squared() > 0.01:
-		flat = flat.move_toward(wish * top, ACCEL * delta)
+		flat = flat.move_toward(wish * top_speed, ACCEL * delta)
 	else:
 		flat = flat.move_toward(Vector3.ZERO, DECEL * delta)
 	velocity.x = flat.x
 	velocity.z = flat.z
 
-	# aiming locks facing to the camera; otherwise face travel
-	var want := _facing
+	var target_facing := _facing
 	if aiming:
-		want = atan2(-rig.flat_forward().x, -rig.flat_forward().z)
+		target_facing = atan2(-rig.flat_forward().x, -rig.flat_forward().z)
 	elif flat.length() > 0.35:
-		want = atan2(-flat.x, -flat.z)
-	_facing = _lerp_angle(_facing, want, TURN_SPEED * delta)
+		target_facing = atan2(-flat.x, -flat.z)
+	_facing = _lerp_angle(_facing, target_facing, TURN_SPEED * delta)
 
 
-func _sim_dodge(delta: float) -> void:
-	_dodge_t += delta
-	var u: float = clampf(_dodge_t / DODGE_TIME, 0.0, 1.0)
-	# front-loaded burst that bleeds off
-	var s: float = DODGE_SPEED * (1.0 - u * u)
-	velocity.x = _dodge_dir.x * s
-	velocity.z = _dodge_dir.z * s
+func _simulate_dodge(delta: float) -> void:
+	_dodge_time += delta
+	var normalized := clampf(_dodge_time / DODGE_TIME, 0.0, 1.0)
+	var speed := DODGE_SPEED * (1.0 - normalized * normalized)
+	velocity.x = _dodge_direction.x * speed
+	velocity.z = _dodge_direction.z * speed
 	_facing = _lerp_angle(_facing,
-			atan2(-_dodge_dir.x, -_dodge_dir.z), 18.0 * delta)
-	if _dodge_t >= DODGE_TIME:
-		state = St.IDLE
+			atan2(-_dodge_direction.x, -_dodge_direction.z), 18.0 * delta)
+	if _dodge_time >= DODGE_TIME:
+		state = State.MOVE
 
 
-func _sim_attack(delta: float, aiming: bool) -> void:
-	_atk_t += delta
-	var u: float = _atk_t / _atk_dur
-	# slight forward lunge as the blow lands
+func _simulate_attack(delta: float, aiming: bool) -> void:
+	_attack_time += delta
+	var normalized := clampf(_attack_time / _attack_duration, 0.0, 1.0)
 	var push := 0.0
-	if u > 0.25 and u < 0.55:
-		push = (2.9 if _atk_heavy else 1.9)
-	var fwd := -Vector3(sin(_facing), 0, cos(_facing))
+	if attack_kind == AttackKind.LIGHT and normalized > 0.22 and normalized < 0.58:
+		push = 2.4 + _combo_step * 0.35
+	elif attack_kind == AttackKind.HEAVY and normalized > 0.28 and normalized < 0.65:
+		push = 3.7
+	var forward := _forward()
 	var flat := Vector3(velocity.x, 0, velocity.z)
-	flat = flat.move_toward(fwd * push, 26.0 * delta)
+	flat = flat.move_toward(forward * push, 30.0 * delta)
 	velocity.x = flat.x
 	velocity.z = flat.z
 
 	if aiming:
 		_facing = _lerp_angle(_facing,
-				atan2(-rig.flat_forward().x, -rig.flat_forward().z), 16.0 * delta)
+				atan2(-rig.flat_forward().x, -rig.flat_forward().z), 18.0 * delta)
+	elif _attack_target_ref != null:
+		var assisted_target := _attack_target_ref.get_ref() as Node3D
+		if is_instance_valid(assisted_target):
+			var toward := assisted_target.global_position - global_position
+			toward.y = 0.0
+			if toward.length_squared() > 0.01 and toward.length() < 5.2:
+				_facing = _lerp_angle(_facing,
+						atan2(-toward.x, -toward.z), 20.0 * delta)
 
-	if u >= 0.30 and u <= 0.56:
-		_melee_sweep()
-	if _atk_t >= _atk_dur:
-		state = St.IDLE
+	if attack_kind == AttackKind.THROW:
+		if not _throw_released and normalized >= 0.33:
+			_throw_released = true
+			axe.throw(hand.global_position, _pending_throw_target)
+	else:
+		var window := Vector2(0.33, 0.61)
+		if attack_kind == AttackKind.LIGHT:
+			window = LIGHT_WINDOWS[_combo_step]
+		if normalized >= window.x and normalized <= window.y:
+			if not _active_started:
+				_active_started = true
+				_previous_blade = axe.edge_world_position()
+			_weapon_sweep(attack_kind == AttackKind.HEAVY)
+		_previous_blade = axe.edge_world_position()
 
-
-func _sim_hurt(delta: float) -> void:
-	_hurt_t -= delta
-	velocity.x = move_toward(velocity.x, 0.0, 24.0 * delta)
-	velocity.z = move_toward(velocity.z, 0.0, 24.0 * delta)
-	if _hurt_t <= 0.0:
-		state = St.IDLE
-
-
-func _melee_sweep() -> void:
-	var dmg := DAMAGE_UNARMED
-	if axe != null and axe.is_held():
-		dmg = DAMAGE_HEAVY if _atk_heavy else DAMAGE_LIGHT
-	var fwd := -Vector3(sin(_facing), 0, cos(_facing))
-	for e in get_tree().get_nodes_in_group("enemy"):
-		if e in _atk_hits or not is_instance_valid(e):
-			continue
-		if not e.has_method("take_hit"):
-			continue
-		var to: Vector3 = e.global_position - global_position
-		to.y = 0.0
-		if to.length() > REACH:
-			continue
-		if to.length_squared() > 0.001 and fwd.dot(to.normalized()) < ARC_COS:
-			continue
-		_atk_hits.append(e)
-		var n := to.normalized() if to.length_squared() > 0.001 else fwd
-		e.take_hit(dmg, n, _atk_heavy)
-		var at: Vector3 = e.global_position + Vector3.UP * 1.0
-		Fx.blood(_world_root, at, -n, 1.0 if _atk_heavy else 0.75)
-		Sfx.play_3d("flesh", at, 0.0)
-		if _atk_heavy:
-			Juice.impact(0.42, n, 0.05, 0.08)
+	if _attack_time >= _attack_duration:
+		if _queued_kind != AttackKind.NONE and axe.is_held():
+			var next := _queued_kind
+			_queued_kind = AttackKind.NONE
+			if next == AttackKind.LIGHT:
+				_combo_step = (_combo_step + 1) % LIGHT_CLIPS.size()
+				_combo_timeout = 0.72
+			_begin_attack(next)
 		else:
-			Juice.impact(0.22, n, 0.16, 0.045)
+			_combo_timeout = 0.62 if attack_kind == AttackKind.LIGHT else 0.0
+			if attack_kind == AttackKind.LIGHT and _combo_step >= LIGHT_CLIPS.size() - 1:
+				_combo_step = 0
+			state = State.MOVE
+			attack_kind = AttackKind.NONE
 
 
-# ------------------------------------------------------------------- damage
+func _simulate_hurt(delta: float) -> void:
+	_hurt_time -= delta
+	_brake(delta)
+	if _hurt_time <= 0.0:
+		state = State.MOVE
 
-func take_hit(amount: float, from_dir: Vector3) -> void:
-	if state == St.DEAD or state == St.DODGE:
-		return  # dodge roll grants full evasion
+
+func _simulate_recall(delta: float) -> void:
+	_brake(delta, 15.0)
+	if axe.is_held():
+		_on_axe_caught()
+
+
+func _simulate_catch(delta: float) -> void:
+	_catch_time -= delta
+	_brake(delta, 16.0)
+	if _catch_time <= 0.0:
+		state = State.MOVE
+
+
+func _brake(delta: float, rate := DECEL) -> void:
+	velocity.x = move_toward(velocity.x, 0.0, rate * delta)
+	velocity.z = move_toward(velocity.z, 0.0, rate * delta)
+
+
+func _weapon_sweep(heavy: bool) -> void:
+	if axe == null or not axe.is_held():
+		_unarmed_sweep(heavy)
+		return
+	var blade := axe.edge_world_position()
+	var hand_position := hand.global_position
+	for candidate in get_tree().get_nodes_in_group("enemy"):
+		var enemy := candidate as Node3D
+		if enemy == null or enemy in _attack_hits or not is_instance_valid(enemy):
+			continue
+		if not enemy.has_method("take_hit"):
+			continue
+		var target := enemy.global_position + Vector3.UP * 0.95
+		if enemy.has_method("hit_point"):
+			target = enemy.hit_point()
+		if global_position.distance_to(target) > MELEE_RANGE:
+			continue
+		var swept := LeviathanAxe.segment_distance(_previous_blade, blade, target)
+		var haft := LeviathanAxe.segment_distance(hand_position, blade, target)
+		if minf(swept, haft) > HIT_RADIUS:
+			continue
+		if _world_occludes(target):
+			continue
+		_register_melee_hit(enemy, target, heavy)
+
+
+func _unarmed_sweep(heavy: bool) -> void:
+	var forward := _forward()
+	for candidate in get_tree().get_nodes_in_group("enemy"):
+		var enemy := candidate as Node3D
+		if enemy == null or enemy in _attack_hits or not enemy.has_method("take_hit"):
+			continue
+		var to_enemy := enemy.global_position - global_position
+		to_enemy.y = 0
+		if to_enemy.length() <= 1.65 and forward.dot(to_enemy.normalized()) > 0.35:
+			_register_melee_hit(enemy, enemy.global_position + Vector3.UP, heavy)
+
+
+func _best_assist_target() -> Node3D:
+	var best: Node3D
+	var best_score := INF
+	var forward := _forward()
+	for candidate in get_tree().get_nodes_in_group("enemy"):
+		var enemy := candidate as Node3D
+		if enemy == null or not is_instance_valid(enemy):
+			continue
+		var offset := enemy.global_position - global_position
+		offset.y = 0.0
+		var distance := offset.length()
+		if distance < 0.05 or distance > 5.4:
+			continue
+		var alignment := forward.dot(offset / distance)
+		if alignment < 0.20:
+			continue
+		if _world_occludes(enemy.global_position + Vector3.UP):
+			continue
+		var score := distance - alignment * 1.8
+		if score < best_score:
+			best_score = score
+			best = enemy
+	return best
+
+
+func _world_occludes(target: Vector3) -> bool:
+	var from := global_position + Vector3.UP * 1.15
+	var query := PhysicsRayQueryParameters3D.create(from, target)
+	query.collision_mask = 1
+	query.exclude = [get_rid()]
+	return not get_world_3d().direct_space_state.intersect_ray(query).is_empty()
+
+
+func _register_melee_hit(enemy: Node3D, target: Vector3, heavy: bool) -> void:
+	_attack_hits.append(enemy)
+	var direction := target - global_position
+	direction.y = 0
+	direction = direction.normalized() if direction.length_squared() > 0.001 else _forward()
+	var damage: float = (DAMAGE_HEAVY if _empowered_heavy else DAMAGE_HEAVY_UNPOWERED) \
+			if heavy else float(DAMAGE_LIGHT[_combo_step])
+	if not axe.is_held():
+		damage = DAMAGE_UNARMED
+	damage *= damage_multiplier
+	enemy.take_hit(damage, direction, heavy)
+	Fx.blood(_world_root, target, -direction, 1.25 if heavy else 0.85)
+	if heavy and _empowered_heavy:
+		Fx.rune_flash(_world_root, target)
+	Sfx.play_3d("flesh", target, 1.0)
+	Juice.impact(0.48 if heavy else 0.26, direction,
+			0.05 if heavy else 0.14, 0.082 if heavy else 0.045)
+	focus = minf(max_focus, focus + (12.0 if heavy else 6.0))
+	focus_changed.emit(focus, max_focus)
+
+
+# -------------------------------------------------------------------- damage
+
+func take_hit(amount: float, from_direction: Vector3) -> void:
+	if get_meta("qa_invulnerable", false):
+		return
+	if state == State.DEAD:
+		return
+	if state == State.DODGE and _dodge_time >= DODGE_INVULN_START \
+			and _dodge_time <= DODGE_INVULN_END:
+		focus = minf(max_focus, focus + 18.0)
+		focus_changed.emit(focus, max_focus)
+		perfect_dodge.emit()
+		Juice.add_trauma(0.12, -from_direction)
+		return
 	health = maxf(0.0, health - amount)
-	health_changed.emit(health, MAX_HEALTH)
-	Juice.impact(0.5, from_dir, 0.10, 0.06)
+	health_changed.emit(health, max_health)
+	Juice.impact(0.52, from_direction, 0.10, 0.06)
 	Sfx.play_2d("hurt_player", 0.0)
-	velocity += from_dir.normalized() * 3.4
+	velocity += from_direction.normalized() * 3.8
 	if health <= 0.0:
-		state = St.DEAD
+		state = State.DEAD
+		control_enabled = false
+		_play_timed("Death_A", 1.15, 0.06)
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		died.emit()
 	else:
-		state = St.HURT
-		_hurt_t = 0.22
+		state = State.HURT
+		_hurt_time = 0.34
+		_play_timed("Hit_A" if randi() % 2 == 0 else "Hit_B", _hurt_time, 0.04)
+
+
+func heal(amount: float) -> void:
+	health = minf(max_health, health + amount)
+	health_changed.emit(health, max_health)
+
+
+func apply_upgrade(id: StringName) -> void:
+	match id:
+		&"fury":
+			damage_multiplier += 0.18
+		&"vitality":
+			max_health += 28.0
+			health = minf(max_health, health + 28.0)
+		&"focus":
+			max_focus += 25.0
+			focus = max_focus
+	health_changed.emit(health, max_health)
+	focus_changed.emit(focus, max_focus)
+
+
+func set_control_enabled(enabled: bool) -> void:
+	control_enabled = enabled
+	rig.enabled = enabled
+	if not enabled:
+		Boot.reset_virtual_input()
+
+
+func hit_point() -> Vector3:
+	return global_position + Vector3.UP * 1.05
+
+
+func is_alive() -> bool:
+	return state != State.DEAD
 
 
 # ---------------------------------------------------------------- animation
 
-func _animate(delta: float, aiming: bool) -> void:
-	if model == null:
+func _play_animation(name: StringName, blend := 0.14, speed := 1.0) -> void:
+	if animation_player == null or not animation_player.has_animation(name):
+		push_warning("Player animation missing: %s" % name)
+		return
+	if _current_animation == name and animation_player.is_playing():
+		animation_player.speed_scale = speed
+		return
+	_current_animation = name
+	animation_player.play(name, blend, speed)
+
+
+func _play_timed(name: StringName, duration: float, blend := 0.08) -> void:
+	if animation_player == null or not animation_player.has_animation(name):
+		return
+	var clip := animation_player.get_animation(name)
+	var speed := clip.length / maxf(duration, 0.05)
+	_play_animation(name, blend, speed)
+
+
+func _update_locomotion_animation(delta: float, aiming: bool) -> void:
+	if state in [State.ATTACK, State.DODGE, State.HURT, State.CATCH, State.DEAD]:
+		return
+	if state == State.RECALL:
 		return
 	var flat := Vector3(velocity.x, 0, velocity.z)
-	var spd := flat.length()
-	_breathe += delta * 1.7
+	var speed := flat.length()
+	if speed < 0.22:
+		var idle_clip := "Unarmed_Idle"
+		if axe.is_held():
+			idle_clip = "2H_Melee_Idle" if aiming else "Idle"
+		_play_animation(idle_clip, 0.18, 1.0)
+		return
 
-	var model_roll := 0.0
-	var model_pitch := 0.0
+	var clip := "Running_A"
+	if aiming:
+		var local := model.global_transform.basis.inverse() * flat.normalized()
+		if absf(local.x) > 0.46:
+			clip = "Running_Strafe_Right" if local.x > 0 else "Running_Strafe_Left"
+		elif local.z > 0.30:
+			clip = "Walking_Backwards"
+	var animation_speed := clampf(speed / (SPEED * 0.72), 0.70, 1.45)
+	_play_animation(clip, 0.16, animation_speed)
 
-	if state == St.DODGE:
-		var u: float = clampf(_dodge_t / DODGE_TIME, 0.0, 1.0)
-		model_pitch = -TAU * u   # forward shoulder roll
-	model.rotation = Vector3(model_pitch, _facing, model_roll)
-
-	# ---- locomotion
-	var gait: float = clampf(spd / SPEED, 0.0, 1.4)
-	if state == St.DODGE:
-		gait = 0.0
-	_walk_phase += delta * (2.1 + gait * 7.4)
-	var sw: float = sin(_walk_phase)
-	var sw2: float = sin(_walk_phase + PI)
-
-	var leg_amp: float = 0.62 * gait
-	var arm_amp: float = 0.52 * gait
-
-	_rot("Thigh_R", Vector3(sw * leg_amp, 0, 0))
-	_rot("Thigh_L", Vector3(sw2 * leg_amp, 0, 0))
-	# knees only bend one way
-	_rot("Shin_R", Vector3(-maxf(0.0, -sw) * 1.05 * gait, 0, 0))
-	_rot("Shin_L", Vector3(-maxf(0.0, -sw2) * 1.05 * gait, 0, 0))
-
-	var hip_bob: float = sin(_walk_phase * 2.0) * 0.035 * gait
-	var hips: Node3D = _limbs.get("Hips")
-	if hips != null:
-		hips.position.y = 0.94 + hip_bob
-	_rot("Hips", Vector3(0.05 * gait, sw * 0.10 * gait, 0))
-	_rot("ChestPivot", Vector3(0.04 + 0.05 * gait,
-			-sw * 0.13 * gait + sin(_breathe) * 0.012, 0))
-
-	# footstep on each downswing crossing
-	var down := sw < 0.0
-	if gait > 0.25 and down != _step_flag:
-		_step_flag = down
-		if is_on_floor():
-			Sfx.play_3d("step", global_position, -4.0)
-	elif gait <= 0.25:
-		_step_flag = down
-
-	# ---- arms: base swing, then attack/aim layers override the right arm
-	_rot("UpperArm_L", Vector3(sw * arm_amp, 0, 0.12))
-	_rot("Forearm_L", Vector3(-0.22 - maxf(0.0, sw) * 0.35 * gait, 0, 0))
-
-	# carry the axe out from the torso so its silhouette reads against the
-	# background instead of disappearing into the chest
-	var r_arm := Vector3(0.12 + sw2 * arm_amp * 0.50, 0, -0.30)
-	var r_fore := Vector3(-0.72, 0, 0)
-
-	if aiming and state != St.ATTACK:
-		# wind the axe back behind the head, ready to throw
-		r_arm = Vector3(-2.05, -0.30, -0.55)
-		r_fore = Vector3(-1.25, 0, 0)
-		_rot("ChestPivot", Vector3(0.04, -0.34, 0))
-
-	if state == St.ATTACK:
-		var u: float = clampf(_atk_t / _atk_dur, 0.0, 1.0)
-		var a := _attack_pose(u)
-		r_arm = a[0]
-		r_fore = a[1]
-		_rot("ChestPivot", a[2])
-		_rot("NeckPivot", Vector3(a[3].x * 0.5, a[3].y * 0.5, 0))
-
-	_rot("UpperArm_R", r_arm)
-	_rot("Forearm_R", r_fore)
-
-	if state != St.ATTACK:
-		_rot("NeckPivot", Vector3(-0.05, 0, 0))
-	# head tracks the camera pitch a little while aiming
-	_rot("HeadPivot", Vector3(rig.pitch * 0.35 * rig.aim_blend, 0, 0))
+	_locomotion_phase += delta * speed * 1.35
+	var side := sin(_locomotion_phase) >= 0.0
+	if side != _step_side and is_on_floor():
+		_step_side = side
+		Sfx.play_3d("step", global_position, -4.0, randf_range(0.94, 1.04))
 
 
-## Three-phase swing: wind up, strike, recover. Returns
-## [upper_arm, forearm, chest, neck] euler offsets.
-func _attack_pose(u: float) -> Array:
-	var side := float(_atk_side)
-	var wind := 0.30
-	var strike := 0.56
-	if u < wind:
-		var k: float = u / wind
-		k = k * k * (3.0 - 2.0 * k)
-		return [
-			Vector3(lerpf(-0.10, -2.35, k), lerpf(0.0, -0.45, k) * side,
-					lerpf(-0.10, -0.62, k)),
-			Vector3(lerpf(-0.95, -1.55, k), 0, 0),
-			Vector3(0.04, lerpf(0.0, -0.46, k) * side, 0),
-			Vector3(lerpf(0.0, -0.18, k), lerpf(0.0, -0.30, k) * side, 0),
-		]
-	elif u < strike:
-		# fast, near-linear drive through the contact window
-		var k: float = (u - wind) / (strike - wind)
-		k = k * k
-		return [
-			Vector3(lerpf(-2.35, 0.95, k), lerpf(-0.45, 0.38, k) * side,
-					lerpf(-0.62, 0.20, k)),
-			Vector3(lerpf(-1.55, -0.18, k), 0, 0),
-			Vector3(lerpf(0.04, 0.22, k), lerpf(-0.46, 0.40, k) * side, 0),
-			Vector3(lerpf(-0.18, 0.22, k), lerpf(-0.30, 0.26, k) * side, 0),
-		]
-	else:
-		var k: float = (u - strike) / (1.0 - strike)
-		k = k * k * (3.0 - 2.0 * k)
-		return [
-			Vector3(lerpf(0.95, -0.10, k), lerpf(0.38, 0.0, k) * side,
-					lerpf(0.20, -0.10, k)),
-			Vector3(lerpf(-0.18, -0.95, k), 0, 0),
-			Vector3(lerpf(0.22, 0.04, k), lerpf(0.40, 0.0, k) * side, 0),
-			Vector3(lerpf(0.22, 0.0, k), lerpf(0.26, 0.0, k) * side, 0),
-		]
+func _forward() -> Vector3:
+	return -Vector3(sin(_facing), 0, cos(_facing))
 
 
-static func _lerp_angle(from: float, to: float, w: float) -> float:
-	return from + wrapf(to - from, -PI, PI) * clampf(w, 0.0, 1.0)
+static func _lerp_angle(from: float, to: float, weight: float) -> float:
+	return from + wrapf(to - from, -PI, PI) * clampf(weight, 0.0, 1.0)
 
 
 func revive() -> void:
-	health = MAX_HEALTH
-	state = St.IDLE
+	max_health = BASE_MAX_HEALTH
+	health = max_health
+	focus = max_focus
+	damage_multiplier = 1.0
+	state = State.MOVE
+	attack_kind = AttackKind.NONE
 	velocity = Vector3.ZERO
-	health_changed.emit(health, MAX_HEALTH)
+	control_enabled = true
+	_play_animation("Idle", 0.0, 1.0)
+	health_changed.emit(health, max_health)
+	focus_changed.emit(focus, max_focus)

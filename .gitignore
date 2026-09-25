@@ -9,3 +9,8 @@ build/
 /opt_tmp/
 __pycache__/
 *.pyc
+
+
+# Generated visual-QA corpus (1,000 frames + reports/contact sheets)
+artifacts/visual_qa/
+artifacts/actor_gallery.png

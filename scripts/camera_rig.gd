@@ -10,18 +10,20 @@ extends Node3D
 ##                +- Camera3D (carries only shake, so shake never fights the rig)
 
 const SENS := 0.0022
+const JOY_LOOK_SPEED := 2.35
 const PITCH_MIN := deg_to_rad(-62.0)
 const PITCH_MAX := deg_to_rad(38.0)
 
 ## free-look framing
-const FREE_LEN := 4.30
-const FREE_OFFSET := Vector3(0.45, 0.30, 0.0)
-const FREE_FOV := 74.0
+const FREE_LEN := 5.25
+const FREE_OFFSET := Vector3(0.62, 0.30, 0.0)
+const FREE_FOV := 68.0
 
-## tight aim framing: closer, further over the shoulder, narrower FOV
-const AIM_LEN := 1.85
-const AIM_OFFSET := Vector3(0.78, 0.22, 0.0)
-const AIM_FOV := 55.0
+## Aim stays close enough to feel intimate without letting the production hero
+## block half the target as the old 1.85m boom did.
+const AIM_LEN := 3.10
+const AIM_OFFSET := Vector3(0.94, 0.19, 0.0)
+const AIM_FOV := 51.0
 
 const BLEND_SPEED := 9.5
 
@@ -37,6 +39,8 @@ var boom: Node3D      # positioned BY the spring arm; never written to directly
 var camera: Camera3D
 
 var _want_aim := false
+var _shoulder_side := 1.0
+var _fov_kick := 0.0
 
 
 func _ready() -> void:
@@ -51,7 +55,7 @@ func _ready() -> void:
 	arm = SpringArm3D.new()
 	arm.name = "Arm"
 	arm.spring_length = FREE_LEN
-	arm.margin = 0.30
+	arm.margin = 0.36
 	arm.collision_mask = 1  # world geometry only
 	shoulder.add_child(arm)
 
@@ -80,10 +84,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		yaw -= event.relative.x * SENS
 		pitch = clampf(pitch - event.relative.y * SENS, PITCH_MIN, PITCH_MAX)
+	elif event.is_action_pressed("shoulder_swap"):
+		_shoulder_side *= -1.0
 
 
 func set_aiming(v: bool) -> void:
 	_want_aim = v
+
+
+func add_fov_kick(amount: float) -> void:
+	_fov_kick = minf(6.0, _fov_kick + amount)
 
 
 func _process(delta: float) -> void:
@@ -94,6 +104,14 @@ func _process(delta: float) -> void:
 			yaw -= tl.x * SENS
 			pitch = clampf(pitch - tl.y * SENS, PITCH_MIN, PITCH_MAX)
 
+	# Gamepad right stick uses time-based angular speed rather than pixel sensitivity.
+	if enabled:
+		var joy_look := Input.get_vector("look_left", "look_right", "look_up", "look_down")
+		if joy_look.length_squared() > 0.01:
+			yaw -= joy_look.x * JOY_LOOK_SPEED * delta
+			pitch = clampf(pitch - joy_look.y * JOY_LOOK_SPEED * delta,
+					PITCH_MIN, PITCH_MAX)
+
 	var target := 1.0 if _want_aim else 0.0
 	aim_blend = move_toward(aim_blend, target, BLEND_SPEED * delta)
 	# smoothstep the blend so the transition eases at both ends
@@ -101,9 +119,12 @@ func _process(delta: float) -> void:
 
 	rotation.y = yaw
 	pitch_node.rotation.x = pitch
-	shoulder.position = FREE_OFFSET.lerp(AIM_OFFSET, t)
+	var offset := FREE_OFFSET.lerp(AIM_OFFSET, t)
+	offset.x *= _shoulder_side
+	shoulder.position = offset
 	arm.spring_length = lerpf(FREE_LEN, AIM_LEN, t)
-	camera.fov = lerpf(FREE_FOV, AIM_FOV, t)
+	_fov_kick = move_toward(_fov_kick, 0.0, delta * 15.0)
+	camera.fov = lerpf(FREE_FOV, AIM_FOV, t) + _fov_kick
 
 	var s: Array = Juice.shake_sample(1.0)
 	camera.position = s[0] as Vector3
